@@ -45,12 +45,19 @@
 #
 # ─── RELEASE PROCESS ───────────────────────────────────────────────────────────
 #
-# Run the following command locally to start an interactive release:
+# `main` only accepts reviewed pull requests (techdome-io org ruleset), so the
+# interactive `npm run release` (which commits and pushes to main) can't be used.
+# Instead:
 #
-#   npm run release
+#   1. Open a PR that bumps "version" in package.json and package-lock.json and
+#      adds a CHANGELOG.md entry. Merge it after review.
+#   2. Tag the merged commit and push only the tag:
+#        git switch main && git pull
+#        git tag 0.1.2
+#        git push origin 0.1.2
 #
-# This will lint, build, prompt for a version bump, update the changelog,
-# commit, tag, and push — which triggers this workflow to publish to npm.
+# The tag triggers this workflow, which lints, builds and publishes to npm with
+# provenance through npm Trusted Publishing (no token needed).
 
 name: Publish
 

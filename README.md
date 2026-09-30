@@ -17,6 +17,8 @@ JIA is an AI hiring platform. This node lets a workflow generate and manage job 
 
 Follow the [installation guide](https://docs.n8n.io/integrations/community-nodes/installation/) in the n8n community nodes documentation, and install the package `n8n-nodes-jia`.
 
+On self-hosted n8n, an instance **owner or admin** installs it once from **Settings → Community nodes → Install**; the node and credential are then available to every user of that instance. If the menu is missing, set `N8N_COMMUNITY_PACKAGES_ENABLED=true`. In queue mode, also set `N8N_REINSTALL_MISSING_PACKAGES=true` so workers install it too.
+
 ## Credentials
 
 The node uses a **JIA API** credential.
@@ -27,7 +29,16 @@ The node uses a **JIA API** credential.
    - **API Key**: the key from step 1.
 3. Click **Test**. n8n checks the key against JIA without using any credits.
 
-A key acts as the JIA member who created it. It stops working as soon as it is revoked in JIA, or that member is deactivated.
+A key acts as the JIA member who created it. It stops working as soon as it is revoked in JIA, that member is deactivated, or that member changes their password or signs out everywhere.
+
+### Setting up JIA for a team
+
+Each key belongs to one JIA organization, so use one credential per organization (for example **JIA – QA** and **JIA – Production**).
+
+1. A JIA organization owner creates one key per environment.
+2. An n8n admin creates a project (for example **JIA Hiring**), adds the **JIA API** credential to it, and adds the people who build hiring workflows as project members.
+3. Members pick the shared credential in the JIA node. They can run workflows with it but can't see the key.
+4. To rotate a key, revoke it in JIA, create a new one, and update the single credential; every workflow keeps working.
 
 ## Operations
 
@@ -92,6 +103,19 @@ Built with `@n8n/node-cli` and tested against n8n 2.x.
 ## Resources
 
 - [n8n community nodes documentation](https://docs.n8n.io/integrations/#community-nodes)
+
+## Releasing (maintainers)
+
+`main` only accepts reviewed pull requests, so releases are cut by tag:
+
+1. Open a PR that bumps `version` in `package.json` and `package-lock.json` and adds a `CHANGELOG.md` entry. Merge it after review.
+2. Tag the merged commit and push only the tag:
+   ```bash
+   git switch main && git pull
+   git tag 0.1.2
+   git push origin 0.1.2
+   ```
+3. The tag runs `.github/workflows/publish.yml`, which lints, builds and publishes to npm with provenance through npm Trusted Publishing.
 
 ## Version history
 
