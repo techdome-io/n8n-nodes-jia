@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2 (2026-09-30)
+
+- Node category is `Productivity` only. `HITL` is not an allowed community node category and failed n8n's verification scan.
+
 ## 0.1.1 (2026-09-30)
 
 - Published from GitHub Actions with npm provenance (required for n8n verification).
