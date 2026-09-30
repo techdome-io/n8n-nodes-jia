@@ -1,0 +1,18 @@
+{
+	"node": "n8n-nodes-jia.jia",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["HITL", "Productivity"],
+	"resources": {
+		"credentialDocumentation": [
+			{
+				"url": "https://github.com/techdome-io/n8n-nodes-jia#credentials"
+			}
+		],
+		"primaryDocumentation": [
+			{
+				"url": "https://github.com/techdome-io/n8n-nodes-jia#readme"
+			}
+		]
+	}
+}
