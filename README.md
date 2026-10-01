@@ -2,7 +2,7 @@
 
 This is an n8n community node. It lets you use [JIA (Just Interview AI)](https://justinterview.ai) in your n8n workflows.
 
-JIA is an AI hiring platform. This node lets a workflow generate and manage job descriptions in your JIA organization.
+JIA is an AI hiring platform. This node lets a workflow generate and manage job descriptions and screen resumes in your JIA organization.
 
 [n8n](https://n8n.io/) is a [fair-code licensed](https://docs.n8n.io/sustainable-use-license/) workflow automation platform.
 
@@ -79,9 +79,40 @@ Each job description is returned as one item:
 
 A draft that was not saved has `"saved": false` and `"job_id": null`.
 
+### Resume
+
+| Operation | What it does |
+|---|---|
+| **Screen** | Scores one resume against a job with JIA AI. The resume comes from an input binary field (default `data`), for example a Gmail attachment (`attachment_0`), an HTTP download or a form upload. Choose **Existing Job** to screen against a job in JIA, or **Job Description Text** to paste one. |
+
+Each input item is screened separately, so 10 resumes in give 10 results out. JIA accepts **PDF and DOCX** up to 10 MB; scanned (image-only) PDFs can't be read.
+
+#### Screening output
+
+```json
+{
+  "score": 88,
+  "composite_score": 85.7,
+  "summary": "Strong fit for the Senior Backend Engineer role…",
+  "strengths": ["Relevant experience", "Relevant projects", "Certifications", "Resume quality"],
+  "gaps": [],
+  "attributes": { "relevant_experience_score": 92, "relevant_projects_score": 85, "certifications_score": 80, "resume_quality_score": 95 },
+  "experience_gap_months": 0,
+  "candidate": { "name": "Aarav Test", "email": "aarav.test@example.com", "phone": "+919800000010", "years_of_experience": 6 },
+  "job_id": 7980,
+  "injection_detected": false,
+  "credits_remaining": 2,
+  "file_name": "resume.pdf"
+}
+```
+
+`score` is top level so an IF node can branch on it, for example `{{ $json.score >= 70 }}`. `composite_score` uses the job's evaluation profile and is `null` when screening against pasted text. Turn on **Include Input Binary** to pass the resume file on to later steps.
+
 ## Usage
 
 **Sheet row to published job**: Google Sheets Trigger (new row) → JIA *Job Description: Generate* with **Job Details** set to `{{ $json.role }}, {{ $json.experience }}, {{ $json.location }}` → Slack message with the new `job_id`.
+
+**Screen inbound applications**: Gmail Trigger (has attachment) → JIA *Resume: Screen* with **Input Binary Field** `attachment_0` and an **Existing Job** → IF `{{ $json.score >= 70 }}` → notify the recruiter.
 
 **Draft for review**: JIA *Generate* with **Save to JIA** off → send the draft for approval → JIA *Create* with the approved fields.
 
@@ -92,6 +123,7 @@ A draft that was not saved has `"saved": false` and `"job_id": null`.
 - **Saves are not retried automatically**, because a retry would create a duplicate job and use another credit. If you enable n8n's *Retry On Fail*, check JIA for duplicates.
 - **Generation takes time.** AI generation typically takes a few seconds and up to about 20 seconds. The node waits up to 120 seconds per request.
 - **Past deadlines.** JIA rejects deadlines in the past. A past deadline suggested by the AI is dropped; a past deadline you set yourself is sent, and JIA returns an error.
+- **Screening uses a resume-screening credit**, only when a score is produced. Unreadable files and errors are not charged. Screens are not retried automatically.
 - **Rate limit.** Each API key is limited to 60 requests per minute.
 
 Errors from JIA appear in n8n with JIA's own message and HTTP status. With *Continue On Fail* on, a failed item returns `{ "error": "…", "httpCode": "…" }` and the other items keep running.

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.0 (unreleased)
+
+- Resume resource with a Screen operation: scores a PDF or DOCX resume from an input binary field against an existing JIA job or job description text, and returns the score, summary, strengths, gaps, scored attributes and parsed candidate details. Needs the JIA backend with `POST /org/screen-resume` (JIAD-2090).
+
 ## 0.1.2 (2026-09-30)
 
 - Node category is `Productivity` only. `HITL` is not an allowed community node category and failed n8n's verification scan.
