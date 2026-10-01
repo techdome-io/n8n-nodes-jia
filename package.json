@@ -1,6 +1,6 @@
 {
     "name": "n8n-nodes-jia",
-    "version": "0.1.2",
+    "version": "0.2.0",
     "description": "n8n community node for JIA (Just Interview AI): generate job descriptions and screen resumes",
     "license": "MIT",
     "homepage": "https://github.com/techdome-io/n8n-nodes-jia#readme",

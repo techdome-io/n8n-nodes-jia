@@ -11,9 +11,10 @@ import type {
 import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
 import { jobDescriptionFields, jobDescriptionOperations } from './descriptions/JobDescriptionDescription';
-import { jiaApiRequest } from './GenericFunctions';
+import { resumeFields, resumeOperations } from './descriptions/ResumeDescription';
+import { jiaApiRequest, jiaApiUploadRequest } from './GenericFunctions';
 import type { CustomQuestionInput, JdOverrides, JsonObject } from './transform';
-import { buildJdPayload, normaliseJd } from './transform';
+import { buildJdPayload, MIN_JD_TEXT_CHARS, normaliseJd, normaliseScreening, resumeFileProblem } from './transform';
 
 /** Page size for Get Many and the job picker. */
 const PAGE_SIZE = 50;
@@ -43,11 +44,16 @@ export class Jia implements INodeType {
 				name: 'resource',
 				type: 'options',
 				noDataExpression: true,
-				options: [{ name: 'Job Description', value: 'jobDescription' }],
+				options: [
+					{ name: 'Job Description', value: 'jobDescription' },
+					{ name: 'Resume', value: 'resume' },
+				],
 				default: 'jobDescription',
 			},
 			...jobDescriptionOperations,
 			...jobDescriptionFields,
+			...resumeOperations,
+			...resumeFields,
 		],
 	};
 
@@ -84,6 +90,13 @@ export class Jia implements INodeType {
 				const resource = this.getNodeParameter('resource', i) as string;
 				const operation = this.getNodeParameter('operation', i) as string;
 
+				if (resource === 'resume') {
+					if (operation !== 'screen') {
+						throw new NodeOperationError(this.getNode(), `Unsupported operation "${operation}"`, { itemIndex: i });
+					}
+					returnData.push(await screenResume.call(this, i, items[i]));
+					continue;
+				}
 				if (resource !== 'jobDescription') {
 					throw new NodeOperationError(this.getNode(), `Unsupported resource "${resource}"`, { itemIndex: i });
 				}
@@ -198,5 +211,60 @@ function readOverrides(fields: IDataObject): JdOverrides {
 		shiftTimings: fields.shiftTimings as string | undefined,
 		questionnaire: fields.questionnaire as string | undefined,
 		customQuestions: questions,
+	};
+}
+
+/**
+ * Resume > Screen: send one binary resume to POST /org/screen-resume. Each item is
+ * screened on its own, so a batch of resumes becomes one result per resume.
+ * Never retried: a repeat would spend another screening credit.
+ */
+async function screenResume(
+	this: IExecuteFunctions,
+	itemIndex: number,
+	item: INodeExecutionData,
+): Promise<INodeExecutionData> {
+	const binaryPropertyName = (this.getNodeParameter('binaryPropertyName', itemIndex) as string).trim();
+	const binary = this.helpers.assertBinaryData(itemIndex, binaryPropertyName);
+	const data = await this.helpers.getBinaryDataBuffer(itemIndex, binaryPropertyName);
+	const fileName = binary.fileName ?? 'resume';
+
+	const problem = resumeFileProblem(data, fileName);
+	if (problem) {
+		throw new NodeOperationError(this.getNode(), problem, { itemIndex });
+	}
+
+	const fields: Record<string, string> = {};
+	const jdSource = this.getNodeParameter('jdSource', itemIndex) as string;
+	if (jdSource === 'existingJob') {
+		const jobId = String(this.getNodeParameter('screenJobId', itemIndex, '', { extractValue: true }) ?? '').trim();
+		if (!/^\d+$/.test(jobId)) {
+			throw new NodeOperationError(this.getNode(), 'Job must be a numeric JIA job ID', { itemIndex });
+		}
+		fields.job_id = jobId;
+	} else {
+		const jdText = (this.getNodeParameter('jdText', itemIndex) as string).trim();
+		if (jdText.length < MIN_JD_TEXT_CHARS) {
+			throw new NodeOperationError(
+				this.getNode(),
+				`Job Description Text must be at least ${MIN_JD_TEXT_CHARS} characters`,
+				{ itemIndex },
+			);
+		}
+		fields.jd_text = jdText;
+	}
+
+	const result = await jiaApiUploadRequest.call(this, '/org/screen-resume', fields, {
+		fieldName: 'resume',
+		fileName,
+		mimeType: binary.mimeType,
+		data,
+	});
+
+	const includeBinary = (this.getNodeParameter('options', itemIndex, {}) as IDataObject).includeBinary === true;
+	return {
+		json: normaliseScreening(result as JsonObject, fileName) as IDataObject,
+		...(includeBinary && item.binary ? { binary: item.binary } : {}),
+		pairedItem: { item: itemIndex },
 	};
 }

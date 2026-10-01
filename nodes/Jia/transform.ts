@@ -193,3 +193,79 @@ export function errorHint(status: number | undefined, detail: string): string | 
 	if (status !== undefined && status >= 500) return 'JIA had a server error. Check JIA before retrying a save, so you do not create a duplicate.';
 	return undefined;
 }
+
+// ------------------------------------------------------------------ resume
+
+export const MAX_RESUME_BYTES = 10 * 1024 * 1024;
+export const MIN_JD_TEXT_CHARS = 50;
+
+export interface MultipartFile {
+	fieldName: string;
+	fileName: string;
+	mimeType: string;
+	data: Buffer;
+}
+
+const PDF_MAGIC = Buffer.from('%PDF');
+const DOCX_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
+
+/**
+ * Why this file can't be sent as a resume, or undefined if it can. JIA accepts
+ * PDF and DOCX and checks the bytes, not the name, so the node does the same to
+ * fail fast with a clear message instead of spending a request.
+ */
+export function resumeFileProblem(data: Buffer, fileName: string): string | undefined {
+	if (data.length === 0) return `"${fileName}" is empty`;
+	if (data.length > MAX_RESUME_BYTES) return `"${fileName}" is larger than 10 MB`;
+	const head = data.subarray(0, 4);
+	if (!head.equals(PDF_MAGIC) && !head.equals(DOCX_MAGIC)) {
+		return `"${fileName}" is not a PDF or DOCX file. JIA screens PDF and DOCX resumes only.`;
+	}
+	return undefined;
+}
+
+/** Build a multipart/form-data body without any runtime dependency. */
+export function buildMultipartBody(
+	fields: Record<string, string>,
+	file: MultipartFile,
+	boundary = `----n8nJia${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`,
+): { body: Buffer; contentType: string } {
+	const quote = (value: string) => value.replace(/[\r\n"]/g, (c) => (c === '"' ? '%22' : ' '));
+	const parts: Buffer[] = [];
+	for (const [name, value] of Object.entries(fields)) {
+		parts.push(
+			Buffer.from(
+				`--${boundary}\r\nContent-Disposition: form-data; name="${quote(name)}"\r\n\r\n${value}\r\n`,
+				'utf8',
+			),
+		);
+	}
+	parts.push(
+		Buffer.from(
+			`--${boundary}\r\nContent-Disposition: form-data; name="${quote(file.fieldName)}"; filename="${quote(file.fileName)}"\r\n` +
+				`Content-Type: ${file.mimeType || 'application/octet-stream'}\r\n\r\n`,
+			'utf8',
+		),
+		file.data,
+		Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8'),
+	);
+	return { body: Buffer.concat(parts), contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
+/** Flat screening output; `score` stays top level so an IF node can branch on it. */
+export function normaliseScreening(raw: JsonObject, fileName: string): JsonObject {
+	return {
+		score: raw.score ?? null,
+		composite_score: raw.composite_score ?? null,
+		summary: raw.summary ?? '',
+		strengths: Array.isArray(raw.strengths) ? raw.strengths : [],
+		gaps: Array.isArray(raw.gaps) ? raw.gaps : [],
+		attributes: raw.attributes ?? {},
+		experience_gap_months: raw.experience_gap_months ?? 0,
+		candidate: raw.candidate ?? {},
+		job_id: raw.job_id ?? null,
+		injection_detected: raw.injection_detected ?? false,
+		credits_remaining: raw.credits_remaining ?? null,
+		file_name: fileName,
+	};
+}
