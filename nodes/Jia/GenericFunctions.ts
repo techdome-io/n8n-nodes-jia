@@ -1,6 +1,7 @@
 import type {
 	IDataObject,
 	IExecuteFunctions,
+	IHookFunctions,
 	IHttpRequestMethods,
 	IHttpRequestOptions,
 	ILoadOptionsFunctions,
@@ -40,7 +41,7 @@ const readDetail = (body: unknown, statusCode: number): string => {
  * message, with a hint for the common cases.
  */
 async function send(
-	this: IExecuteFunctions | ILoadOptionsFunctions,
+	this: IExecuteFunctions | ILoadOptionsFunctions | IHookFunctions,
 	options: IHttpRequestOptions,
 ): Promise<IDataObject> {
 	const credentials = await this.getCredentials('jiaApi');
@@ -89,7 +90,7 @@ async function send(
 
 /** JSON request to JIA. */
 export async function jiaApiRequest(
-	this: IExecuteFunctions | ILoadOptionsFunctions,
+	this: IExecuteFunctions | ILoadOptionsFunctions | IHookFunctions,
 	method: IHttpRequestMethods,
 	path: string,
 	body?: IDataObject,
@@ -116,7 +117,7 @@ export async function jiaApiUploadRequest(
 	this: IExecuteFunctions,
 	path: string,
 	fields: Record<string, string>,
-	file: MultipartFile,
+	file?: MultipartFile,
 ): Promise<IDataObject> {
 	const { body, contentType } = buildMultipartBody(fields, file);
 	return await send.call(this, {

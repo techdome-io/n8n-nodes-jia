@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.0 (unreleased)
+
+Needs the JIA backend with the `/v1` API.
+
+- Display names are now **JustInterview** and **JustInterview API** (the internal names `jia` and `jiaApi` are unchanged, so existing workflows and credentials keep working).
+- The credential sends the key as `Authorization: Bearer` and tests it with `GET /v1/me`. Keys can carry permissions (scopes), and `jia_test_` keys run in sandbox mode.
+- Resume > **Analyze** (`POST /v1/resumes/analyze`): file or https link, returns score, matched and missing skills and a shortlist / review / reject recommendation.
+- **Interview** resource: **Send Invite** (AI voice interview) and **Get Status**.
+- The Job picker uses `GET /v1/jobs`.
+- **JustInterview Trigger** node: *Interview Completed* and *Resume Analyzed*, with signed deliveries.
+- Example workflows in `workflows/`.
+
 ## 0.2.0 (unreleased)
 
 - Resume resource with a Screen operation: scores a PDF or DOCX resume from an input binary field against an existing JIA job or job description text, and returns the score, summary, strengths, gaps, scored attributes and parsed candidate details. Needs the JIA backend with `POST /org/screen-resume` (JIAD-2090).

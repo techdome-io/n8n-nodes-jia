@@ -187,7 +187,11 @@ export function errorHint(status: number | undefined, detail: string): string | 
 	if (status === 402 || (status === 400 && text.includes('credit'))) {
 		return 'Your JIA organization is out of credits for this action. Top up in JIA Billing.';
 	}
-	if (status === 403) return "The API key's user does not have permission for this action in JIA.";
+	if (status === 403) {
+		if (text.includes('scope')) return 'Give the key this permission in JIA under Settings → API Keys, or create a new key with it.';
+		if (text.includes('jia_test_')) return 'Test keys work only with Analyze, Interview and Trigger. Use a live key for Job Description operations.';
+		return "The API key's user does not have permission for this action in JIA.";
+	}
 	if (status === 404) return 'The record was not found in your JIA organization.';
 	if (status === 429) return 'JIA rate limit reached. Enable Retry On Fail with a wait, or slow the workflow down.';
 	if (status !== undefined && status >= 500) return 'JIA had a server error. Check JIA before retrying a save, so you do not create a duplicate.';
@@ -227,7 +231,7 @@ export function resumeFileProblem(data: Buffer, fileName: string): string | unde
 /** Build a multipart/form-data body without any runtime dependency. */
 export function buildMultipartBody(
 	fields: Record<string, string>,
-	file: MultipartFile,
+	file: MultipartFile | undefined,
 	boundary = `----n8nJia${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`,
 ): { body: Buffer; contentType: string } {
 	const quote = (value: string) => value.replace(/[\r\n"]/g, (c) => (c === '"' ? '%22' : ' '));
@@ -240,15 +244,18 @@ export function buildMultipartBody(
 			),
 		);
 	}
-	parts.push(
-		Buffer.from(
-			`--${boundary}\r\nContent-Disposition: form-data; name="${quote(file.fieldName)}"; filename="${quote(file.fileName)}"\r\n` +
-				`Content-Type: ${file.mimeType || 'application/octet-stream'}\r\n\r\n`,
-			'utf8',
-		),
-		file.data,
-		Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8'),
-	);
+	if (file) {
+		parts.push(
+			Buffer.from(
+				`--${boundary}\r\nContent-Disposition: form-data; name="${quote(file.fieldName)}"; filename="${quote(file.fileName)}"\r\n` +
+					`Content-Type: ${file.mimeType || 'application/octet-stream'}\r\n\r\n`,
+				'utf8',
+			),
+			file.data,
+			Buffer.from('\r\n', 'utf8'),
+		);
+	}
+	parts.push(Buffer.from(`--${boundary}--\r\n`, 'utf8'));
 	return { body: Buffer.concat(parts), contentType: `multipart/form-data; boundary=${boundary}` };
 }
 
@@ -268,4 +275,84 @@ export function normaliseScreening(raw: JsonObject, fileName: string): JsonObjec
 		credits_remaining: raw.credits_remaining ?? null,
 		file_name: fileName,
 	};
+}
+
+// ------------------------------------------------------------------ /v1 API
+
+/** POST /v1/resumes/analyze → one flat item. `recommendation` is shortlist / review / reject. */
+export function normaliseAnalysis(raw: JsonObject, source: string): JsonObject {
+	const skills = (raw.skills as JsonObject | undefined) ?? {};
+	return {
+		score: raw.score ?? null,
+		composite_score: raw.composite_score ?? null,
+		recommendation: raw.recommendation ?? null,
+		summary: raw.summary ?? '',
+		strengths: Array.isArray(raw.strengths) ? raw.strengths : [],
+		gaps: Array.isArray(raw.gaps) ? raw.gaps : [],
+		skills_matched: Array.isArray(skills.matched) ? skills.matched : [],
+		skills_missing: Array.isArray(skills.missing) ? skills.missing : [],
+		attributes: raw.attributes ?? {},
+		candidate: raw.candidate ?? {},
+		job_id: raw.job_id ?? null,
+		injection_detected: raw.injection_detected ?? false,
+		credits_remaining: raw.credits_remaining ?? null,
+		test: raw.test ?? false,
+		source,
+	};
+}
+
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+export interface InviteInput {
+	candidateName: string;
+	candidateEmail: string;
+	jobId: string;
+	deadline?: string;
+	resumeUrl?: string;
+}
+
+/** Validate Send Invite input and build the POST /v1/interviews/invite body. Returns an error string or the body. */
+export function buildInviteBody(input: InviteInput): { error?: string; body?: JsonObject } {
+	const name = (input.candidateName ?? '').trim();
+	const email = (input.candidateEmail ?? '').trim();
+	const jobId = String(input.jobId ?? '').trim();
+	if (!name) return { error: 'Candidate Name is required' };
+	if (!EMAIL_RE.test(email)) return { error: `Candidate Email "${email}" is not a valid email address` };
+	if (!/^\d+$/.test(jobId)) return { error: 'Job must be a numeric JIA job ID' };
+	const body: JsonObject = { candidate_name: name, candidate_email: email, job_id: Number(jobId) };
+	if (input.deadline && String(input.deadline).trim()) body.deadline = String(input.deadline).trim();
+	const resumeUrl = (input.resumeUrl ?? '').trim();
+	if (resumeUrl) {
+		if (!/^https:\/\//i.test(resumeUrl)) return { error: 'Resume URL must start with https://' };
+		body.resume_url = resumeUrl;
+	}
+	return { body };
+}
+
+/**
+ * Check an `X-JIA-Signature: t=<unix>,v1=<hex>` header. `computeHex` is HMAC-SHA256(secret, `${t}.${body}`),
+ * passed in so this stays free of runtime imports. A signature older than `toleranceSeconds` is refused.
+ */
+export function signatureProblem(
+	header: string | undefined,
+	rawBody: string,
+	computeHex: (payload: string) => string,
+	nowSeconds: number,
+	toleranceSeconds = 300,
+): string | undefined {
+	if (!header) return 'missing signature';
+	const parts = Object.fromEntries(
+		header.split(',').map((p) => {
+			const i = p.indexOf('=');
+			return [p.slice(0, i).trim(), p.slice(i + 1).trim()];
+		}),
+	);
+	const t = Number(parts.t);
+	if (!Number.isFinite(t) || !parts.v1) return 'malformed signature';
+	if (Math.abs(nowSeconds - t) > toleranceSeconds) return 'signature too old';
+	const expected = computeHex(`${t}.${rawBody}`);
+	if (expected.length !== parts.v1.length) return 'signature mismatch';
+	let diff = 0;
+	for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ parts.v1.charCodeAt(i);
+	return diff === 0 ? undefined : 'signature mismatch';
 }

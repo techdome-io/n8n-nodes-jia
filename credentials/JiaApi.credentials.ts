@@ -9,7 +9,7 @@ import type {
 export class JiaApi implements ICredentialType {
 	name = 'jiaApi';
 
-	displayName = 'JIA API';
+	displayName = 'JustInterview API';
 
 	icon: Icon = { light: 'file:../nodes/Jia/jia.svg', dark: 'file:../nodes/Jia/jia.dark.svg' };
 
@@ -23,7 +23,7 @@ export class JiaApi implements ICredentialType {
 			default: '',
 			required: true,
 			placeholder: 'https://your-jia-backend.example.com',
-			description: 'The URL of the JIA backend API, without a trailing slash',
+			description: 'The URL of the JustInterview (JIA) backend API, without a trailing slash',
 		},
 		{
 			displayName: 'API Key',
@@ -32,7 +32,8 @@ export class JiaApi implements ICredentialType {
 			typeOptions: { password: true },
 			default: '',
 			required: true,
-			description: 'Create a key in JIA under Settings → API Keys',
+			description:
+				'Create a key in JustInterview under Settings → API Keys. A jia_test_ key runs in sandbox mode: no credits are used and no emails are sent.',
 		},
 	];
 
@@ -40,7 +41,7 @@ export class JiaApi implements ICredentialType {
 		type: 'generic',
 		properties: {
 			headers: {
-				'X-JIA-API-Key': '={{$credentials.apiKey}}',
+				Authorization: '=Bearer {{$credentials.apiKey}}',
 			},
 		},
 	};
@@ -48,7 +49,7 @@ export class JiaApi implements ICredentialType {
 	test: ICredentialTestRequest = {
 		request: {
 			baseURL: '={{$credentials.baseUrl.replace(/\\/+$/, "")}}',
-			url: '/org/api-key/me',
+			url: '/v1/me',
 			method: 'GET',
 		},
 	};

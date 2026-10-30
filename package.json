@@ -41,7 +41,8 @@
             "dist/credentials/JiaApi.credentials.js"
         ],
         "nodes": [
-            "dist/nodes/Jia/Jia.node.js"
+            "dist/nodes/Jia/Jia.node.js",
+            "dist/nodes/JiaTrigger/JiaTrigger.node.js"
         ]
     },
     "devDependencies": {

@@ -1,0 +1,115 @@
+{
+	"name": "JustInterview: resume analysis per job",
+	"nodes": [
+		{
+			"parameters": {
+				"formTitle": "Apply",
+				"formDescription": "Upload your resume (PDF or DOCX).",
+				"formFields": {
+					"values": [
+						{ "fieldLabel": "Name", "requiredField": true },
+						{ "fieldLabel": "Email", "fieldType": "email", "requiredField": true },
+						{ "fieldLabel": "Resume", "fieldType": "file", "multipleFiles": false, "acceptFileTypes": ".pdf,.docx", "requiredField": true }
+					]
+				},
+				"options": {}
+			},
+			"id": "4a0b1f0e-0001-4c1e-9a01-000000000001",
+			"name": "Application form",
+			"type": "n8n-nodes-base.formTrigger",
+			"typeVersion": 2.2,
+			"position": [0, 0],
+			"webhookId": "6d1f0c52-0001-4c1e-9a01-000000000001"
+		},
+		{
+			"parameters": {
+				"resource": "resume",
+				"operation": "analyze",
+				"resumeSource": "binary",
+				"analyzeBinaryPropertyName": "Resume",
+				"jdSource": "existingJob",
+				"screenJobId": { "__rl": true, "mode": "list", "value": "" },
+				"options": {}
+			},
+			"id": "4a0b1f0e-0001-4c1e-9a01-000000000002",
+			"name": "Analyze resume",
+			"type": "n8n-nodes-jia.jia",
+			"typeVersion": 1,
+			"position": [240, 0],
+			"credentials": { "jiaApi": { "id": "", "name": "JustInterview API" } }
+		},
+		{
+			"parameters": {
+				"rules": {
+					"values": [
+						{
+							"conditions": {
+								"options": { "caseSensitive": true, "typeValidation": "strict", "version": 2 },
+								"conditions": [
+									{ "leftValue": "={{ $json.recommendation }}", "rightValue": "shortlist", "operator": { "type": "string", "operation": "equals" } }
+								],
+								"combinator": "and"
+							},
+							"renameOutput": true,
+							"outputKey": "Shortlist"
+						},
+						{
+							"conditions": {
+								"options": { "caseSensitive": true, "typeValidation": "strict", "version": 2 },
+								"conditions": [
+									{ "leftValue": "={{ $json.recommendation }}", "rightValue": "review", "operator": { "type": "string", "operation": "equals" } }
+								],
+								"combinator": "and"
+							},
+							"renameOutput": true,
+							"outputKey": "Review"
+						}
+					]
+				},
+				"options": { "fallbackOutput": "extra", "renameFallbackOutput": "Reject" }
+			},
+			"id": "4a0b1f0e-0001-4c1e-9a01-000000000003",
+			"name": "By recommendation",
+			"type": "n8n-nodes-base.switch",
+			"typeVersion": 3.2,
+			"position": [480, 0]
+		},
+		{
+			"parameters": {},
+			"id": "4a0b1f0e-0001-4c1e-9a01-000000000004",
+			"name": "Shortlisted (notify recruiter)",
+			"type": "n8n-nodes-base.noOp",
+			"typeVersion": 1,
+			"position": [720, -160]
+		},
+		{
+			"parameters": {},
+			"id": "4a0b1f0e-0001-4c1e-9a01-000000000005",
+			"name": "Needs review",
+			"type": "n8n-nodes-base.noOp",
+			"typeVersion": 1,
+			"position": [720, 0]
+		},
+		{
+			"parameters": {},
+			"id": "4a0b1f0e-0001-4c1e-9a01-000000000006",
+			"name": "Rejected",
+			"type": "n8n-nodes-base.noOp",
+			"typeVersion": 1,
+			"position": [720, 160]
+		}
+	],
+	"connections": {
+		"Application form": { "main": [[{ "node": "Analyze resume", "type": "main", "index": 0 }]] },
+		"Analyze resume": { "main": [[{ "node": "By recommendation", "type": "main", "index": 0 }]] },
+		"By recommendation": {
+			"main": [
+				[{ "node": "Shortlisted (notify recruiter)", "type": "main", "index": 0 }],
+				[{ "node": "Needs review", "type": "main", "index": 0 }],
+				[{ "node": "Rejected", "type": "main", "index": 0 }]
+			]
+		}
+	},
+	"settings": { "executionOrder": "v1" },
+	"pinData": {}
+}
