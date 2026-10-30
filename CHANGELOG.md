@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0 (unreleased)
+## 1.0.0 (2026-10-30)
 
 Needs the JIA backend with the `/v1` API.
 
