@@ -1,0 +1,123 @@
+{
+	"name": "JustInterview: invite candidates scoring above 70",
+	"nodes": [
+		{
+			"parameters": {
+				"formTitle": "Apply",
+				"formDescription": "Upload your resume (PDF or DOCX).",
+				"formFields": {
+					"values": [
+						{ "fieldLabel": "Name", "requiredField": true },
+						{ "fieldLabel": "Email", "fieldType": "email", "requiredField": true },
+						{ "fieldLabel": "Resume", "fieldType": "file", "multipleFiles": false, "acceptFileTypes": ".pdf,.docx", "requiredField": true }
+					]
+				},
+				"options": {}
+			},
+			"id": "5b1c2a1f-0002-4d2f-8b02-000000000001",
+			"name": "Application form",
+			"type": "n8n-nodes-base.formTrigger",
+			"typeVersion": 2.2,
+			"position": [0, 0],
+			"webhookId": "7e2a1d63-0002-4d2f-8b02-000000000001"
+		},
+		{
+			"parameters": {
+				"resource": "resume",
+				"operation": "analyze",
+				"resumeSource": "binary",
+				"analyzeBinaryPropertyName": "Resume",
+				"jdSource": "existingJob",
+				"screenJobId": { "__rl": true, "mode": "list", "value": "" },
+				"options": {}
+			},
+			"id": "5b1c2a1f-0002-4d2f-8b02-000000000002",
+			"name": "Analyze resume",
+			"type": "n8n-nodes-jia.jia",
+			"typeVersion": 1,
+			"position": [240, 0],
+			"credentials": { "jiaApi": { "id": "", "name": "JustInterview API" } }
+		},
+		{
+			"parameters": {
+				"conditions": {
+					"options": { "caseSensitive": true, "typeValidation": "loose", "version": 2 },
+					"conditions": [
+						{ "leftValue": "={{ $json.score }}", "rightValue": 70, "operator": { "type": "number", "operation": "gt" } }
+					],
+					"combinator": "and"
+				},
+				"options": {}
+			},
+			"id": "5b1c2a1f-0002-4d2f-8b02-000000000003",
+			"name": "Score above 70?",
+			"type": "n8n-nodes-base.if",
+			"typeVersion": 2.2,
+			"position": [480, 0]
+		},
+		{
+			"parameters": {
+				"resource": "interview",
+				"operation": "sendInvite",
+				"candidateName": "={{ $('Application form').item.json.Name }}",
+				"candidateEmail": "={{ $('Application form').item.json.Email }}",
+				"inviteJobId": { "__rl": true, "mode": "id", "value": "={{ $json.job_id }}" },
+				"additionalFields": {}
+			},
+			"id": "5b1c2a1f-0002-4d2f-8b02-000000000004",
+			"name": "Send AI interview",
+			"type": "n8n-nodes-jia.jia",
+			"typeVersion": 1,
+			"position": [720, -100],
+			"credentials": { "jiaApi": { "id": "", "name": "JustInterview API" } }
+		},
+		{
+			"parameters": {},
+			"id": "5b1c2a1f-0002-4d2f-8b02-000000000005",
+			"name": "Not invited",
+			"type": "n8n-nodes-base.noOp",
+			"typeVersion": 1,
+			"position": [720, 100]
+		},
+		{
+			"parameters": { "events": ["interview.completed"] },
+			"id": "5b1c2a1f-0002-4d2f-8b02-000000000006",
+			"name": "Interview completed",
+			"type": "n8n-nodes-jia.jiaTrigger",
+			"typeVersion": 1,
+			"position": [0, 320],
+			"webhookId": "8f3b2e74-0002-4d2f-8b02-000000000006",
+			"credentials": { "jiaApi": { "id": "", "name": "JustInterview API" } }
+		},
+		{
+			"parameters": {
+				"assignments": {
+					"assignments": [
+						{ "id": "a1", "name": "candidate", "value": "={{ $json.candidate_name }} <{{ $json.candidate_email }}>", "type": "string" },
+						{ "id": "a2", "name": "interview_score", "value": "={{ $json.score }}", "type": "number" },
+						{ "id": "a3", "name": "report", "value": "={{ $json.report_url }}", "type": "string" }
+					]
+				},
+				"options": {}
+			},
+			"id": "5b1c2a1f-0002-4d2f-8b02-000000000007",
+			"name": "Interview result (send to your ATS or Slack)",
+			"type": "n8n-nodes-base.set",
+			"typeVersion": 3.4,
+			"position": [240, 320]
+		}
+	],
+	"connections": {
+		"Application form": { "main": [[{ "node": "Analyze resume", "type": "main", "index": 0 }]] },
+		"Analyze resume": { "main": [[{ "node": "Score above 70?", "type": "main", "index": 0 }]] },
+		"Score above 70?": {
+			"main": [
+				[{ "node": "Send AI interview", "type": "main", "index": 0 }],
+				[{ "node": "Not invited", "type": "main", "index": 0 }]
+			]
+		},
+		"Interview completed": { "main": [[{ "node": "Interview result (send to your ATS or Slack)", "type": "main", "index": 0 }]] }
+	},
+	"settings": { "executionOrder": "v1" },
+	"pinData": {}
+}

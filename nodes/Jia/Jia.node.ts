@@ -10,11 +10,20 @@ import type {
 } from 'n8n-workflow';
 import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
+import { interviewFields, interviewOperations } from './descriptions/InterviewDescription';
 import { jobDescriptionFields, jobDescriptionOperations } from './descriptions/JobDescriptionDescription';
 import { resumeFields, resumeOperations } from './descriptions/ResumeDescription';
 import { jiaApiRequest, jiaApiUploadRequest } from './GenericFunctions';
 import type { CustomQuestionInput, JdOverrides, JsonObject } from './transform';
-import { buildJdPayload, MIN_JD_TEXT_CHARS, normaliseJd, normaliseScreening, resumeFileProblem } from './transform';
+import {
+	buildInviteBody,
+	buildJdPayload,
+	MIN_JD_TEXT_CHARS,
+	normaliseAnalysis,
+	normaliseJd,
+	normaliseScreening,
+	resumeFileProblem,
+} from './transform';
 
 /** Page size for Get Many and the job picker. */
 const PAGE_SIZE = 50;
@@ -26,14 +35,14 @@ const PAGE_SIZE = 50;
  */
 export class Jia implements INodeType {
 	description: INodeTypeDescription = {
-		displayName: 'JIA',
+		displayName: 'JustInterview',
 		name: 'jia',
 		icon: { light: 'file:jia.svg', dark: 'file:jia.dark.svg' },
 		group: ['transform'],
 		version: 1,
 		subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',
-		description: 'Generate job descriptions and screen resumes with JIA (Just Interview AI)',
-		defaults: { name: 'JIA' },
+		description: 'Analyze resumes, send AI voice interviews and generate job descriptions with JustInterview (JIA)',
+		defaults: { name: 'JustInterview' },
 		usableAsTool: true,
 		inputs: [NodeConnectionTypes.Main],
 		outputs: [NodeConnectionTypes.Main],
@@ -45,11 +54,14 @@ export class Jia implements INodeType {
 				type: 'options',
 				noDataExpression: true,
 				options: [
+					{ name: 'Interview', value: 'interview' },
 					{ name: 'Job Description', value: 'jobDescription' },
 					{ name: 'Resume', value: 'resume' },
 				],
-				default: 'jobDescription',
+				default: 'resume',
 			},
+			...interviewOperations,
+			...interviewFields,
 			...jobDescriptionOperations,
 			...jobDescriptionFields,
 			...resumeOperations,
@@ -65,17 +77,16 @@ export class Jia implements INodeType {
 				paginationToken?: string,
 			): Promise<INodeListSearchResult> {
 				const page = paginationToken ? Number(paginationToken) : 1;
-				const qs: IDataObject = { pageNo: page, pageLimit: PAGE_SIZE, is_active: true };
-				if (filter) qs.searchText = filter;
-				const response = await jiaApiRequest.call(this, 'GET', '/org/job-descriptions', undefined, qs);
+				const qs: IDataObject = { page, limit: PAGE_SIZE, status: 'active' };
+				if (filter) qs.search = filter;
+				const response = await jiaApiRequest.call(this, 'GET', '/v1/jobs', undefined, qs);
 				const jobs = (response.data as JsonObject[] | undefined) ?? [];
-				const pagination = (response.pagination as JsonObject | undefined) ?? {};
 				return {
 					results: jobs.map((job) => ({
-						name: `${String(job.title ?? 'Untitled')} (#${String(job.job_id)})`,
-						value: String(job.job_id),
+						name: `${String(job.title ?? 'Untitled')} (#${String(job.id)})`,
+						value: String(job.id),
 					})),
-					paginationToken: pagination.hasNext ? String(page + 1) : undefined,
+					paginationToken: response.has_more ? String(page + 1) : undefined,
 				};
 			},
 		},
@@ -91,10 +102,17 @@ export class Jia implements INodeType {
 				const operation = this.getNodeParameter('operation', i) as string;
 
 				if (resource === 'resume') {
-					if (operation !== 'screen') {
+					if (operation === 'analyze') {
+						returnData.push(await analyzeResume.call(this, i, items[i]));
+					} else if (operation === 'screen') {
+						returnData.push(await screenResume.call(this, i, items[i]));
+					} else {
 						throw new NodeOperationError(this.getNode(), `Unsupported operation "${operation}"`, { itemIndex: i });
 					}
-					returnData.push(await screenResume.call(this, i, items[i]));
+					continue;
+				}
+				if (resource === 'interview') {
+					returnData.push({ json: await runInterview.call(this, operation, i), pairedItem: { item: i } });
 					continue;
 				}
 				if (resource !== 'jobDescription') {
@@ -267,4 +285,96 @@ async function screenResume(
 		...(includeBinary && item.binary ? { binary: item.binary } : {}),
 		pairedItem: { item: itemIndex },
 	};
+}
+
+/** The JD source shared by Screen and Analyze: a `job_id` or `jd_text` form field. */
+function readJdFields(this: IExecuteFunctions, itemIndex: number): Record<string, string> {
+	const jdSource = this.getNodeParameter('jdSource', itemIndex) as string;
+	if (jdSource === 'existingJob') {
+		const jobId = String(this.getNodeParameter('screenJobId', itemIndex, '', { extractValue: true }) ?? '').trim();
+		if (!/^\d+$/.test(jobId)) {
+			throw new NodeOperationError(this.getNode(), 'Job must be a numeric JIA job ID', { itemIndex });
+		}
+		return { job_id: jobId };
+	}
+	const jdText = (this.getNodeParameter('jdText', itemIndex) as string).trim();
+	if (jdText.length < MIN_JD_TEXT_CHARS) {
+		throw new NodeOperationError(
+			this.getNode(),
+			`Job Description Text must be at least ${MIN_JD_TEXT_CHARS} characters`,
+			{ itemIndex },
+		);
+	}
+	return { jd_text: jdText };
+}
+
+/**
+ * Resume > Analyze: POST /v1/resumes/analyze with a binary file or a public https link.
+ * Never retried: a repeat would spend another screening credit.
+ */
+async function analyzeResume(
+	this: IExecuteFunctions,
+	itemIndex: number,
+	item: INodeExecutionData,
+): Promise<INodeExecutionData> {
+	const fields = readJdFields.call(this, itemIndex);
+	const resumeSource = this.getNodeParameter('resumeSource', itemIndex) as string;
+	let result: IDataObject;
+	let source: string;
+
+	if (resumeSource === 'url') {
+		const resumeUrl = (this.getNodeParameter('resumeUrl', itemIndex) as string).trim();
+		if (!/^https:\/\//i.test(resumeUrl)) {
+			throw new NodeOperationError(this.getNode(), 'Resume URL must start with https://', { itemIndex });
+		}
+		result = await jiaApiUploadRequest.call(this, '/v1/resumes/analyze', { ...fields, resume_url: resumeUrl });
+		source = resumeUrl;
+	} else {
+		const binaryPropertyName = (this.getNodeParameter('analyzeBinaryPropertyName', itemIndex) as string).trim();
+		const binary = this.helpers.assertBinaryData(itemIndex, binaryPropertyName);
+		const data = await this.helpers.getBinaryDataBuffer(itemIndex, binaryPropertyName);
+		const fileName = binary.fileName ?? 'resume';
+		const problem = resumeFileProblem(data, fileName);
+		if (problem) {
+			throw new NodeOperationError(this.getNode(), problem, { itemIndex });
+		}
+		result = await jiaApiUploadRequest.call(this, '/v1/resumes/analyze', fields, {
+			fieldName: 'resume',
+			fileName,
+			mimeType: binary.mimeType,
+			data,
+		});
+		source = fileName;
+	}
+
+	const includeBinary = (this.getNodeParameter('options', itemIndex, {}) as IDataObject).includeBinary === true;
+	return {
+		json: normaliseAnalysis(result as JsonObject, source) as IDataObject,
+		...(includeBinary && item.binary ? { binary: item.binary } : {}),
+		pairedItem: { item: itemIndex },
+	};
+}
+
+/** Interview > Send Invite / Get Status. Send Invite is never retried: a repeat would spend a credit. */
+async function runInterview(this: IExecuteFunctions, operation: string, itemIndex: number): Promise<IDataObject> {
+	if (operation === 'sendInvite') {
+		const extra = this.getNodeParameter('additionalFields', itemIndex, {}) as IDataObject;
+		const { error, body } = buildInviteBody({
+			candidateName: this.getNodeParameter('candidateName', itemIndex) as string,
+			candidateEmail: this.getNodeParameter('candidateEmail', itemIndex) as string,
+			jobId: String(this.getNodeParameter('inviteJobId', itemIndex, '', { extractValue: true }) ?? ''),
+			deadline: extra.deadline as string | undefined,
+			resumeUrl: extra.resumeUrl as string | undefined,
+		});
+		if (error) throw new NodeOperationError(this.getNode(), error, { itemIndex });
+		return await jiaApiRequest.call(this, 'POST', '/v1/interviews/invite', body as IDataObject);
+	}
+	if (operation === 'getStatus') {
+		const interviewId = String(this.getNodeParameter('interviewId', itemIndex) ?? '').trim();
+		if (!/^(\d+|test_[0-9a-f]+)$/.test(interviewId)) {
+			throw new NodeOperationError(this.getNode(), 'Interview ID must be the interview_id JIA returned', { itemIndex });
+		}
+		return await jiaApiRequest.call(this, 'GET', `/v1/interviews/${encodeURIComponent(interviewId)}`);
+	}
+	throw new NodeOperationError(this.getNode(), `Unsupported operation "${operation}"`, { itemIndex });
 }
